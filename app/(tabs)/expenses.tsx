@@ -1,9 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -18,10 +22,60 @@ import {
   EXPENSE_TYPE_LABELS,
   addExpense,
   deleteExpense,
+  getCompanySettings,
   getDrivers,
   getExpenses,
   updateExpense,
 } from '../constants/queries';
+
+// ── Сканирование счёта через Claude API ─────────────────────
+async function scanInvoiceWithClaude(base64: string, mimeType: string, apiKey: string) {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: mimeType, data: base64 },
+          },
+          {
+            type: 'text',
+            text: `Это счёт на оплату. Извлеки данные и верни ТОЛЬКО JSON без пояснений:
+{
+  "supplier": "название поставщика",
+  "items": [{"name": "наименование", "qty": число, "unit": "ед.изм.", "price": число, "amount": число}],
+  "subtotal": число без НДС,
+  "vat_rate": ставка НДС (22, 20, 10 или 0),
+  "vat_amount": сумма НДС,
+  "total": итого с НДС,
+  "has_vat": true/false,
+  "date": "ГГГГ-ММ-ДД или пусто",
+  "invoice_number": "номер счёта или пусто"
+}`,
+          },
+        ],
+      }],
+    }),
+  });
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(err?.error?.message || 'Ошибка Claude API');
+  }
+  const data = await response.json();
+  const text = data.content?.[0]?.text ?? '';
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Не удалось распознать счёт');
+  return JSON.parse(match[0]);
+}
 
 interface Expense {
   id: number;
@@ -106,6 +160,12 @@ export default function ExpensesScreen() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [cars, setCars] = useState<{ car_number: string; driver_name: string }[]>([]);
 
+  // Сканирование счёта
+  const [invoiceUri, setInvoiceUri] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [invoiceData, setInvoiceData] = useState<any>(null);
+  const apiKeyRef = useRef<string>('');
+
   useEffect(() => {
     loadExpenses();
     loadCars();
@@ -146,10 +206,21 @@ export default function ExpensesScreen() {
   // Итоги по отфильтрованным
   const totalShown = displayedExpenses.reduce((s, e) => s + e.amount, 0);
 
+  // Загрузка API ключа из настроек компании
+  const loadApiKey = async () => {
+    try {
+      const settings = await getCompanySettings();
+      apiKeyRef.current = settings?.claude_api_key ?? '';
+    } catch (_) {}
+  };
+
   const openCreate = () => {
     setIsEditing(false);
     setEditingId(null);
     setForm({ ...EMPTY_FORM, exp_date: today() });
+    setInvoiceUri(null);
+    setInvoiceData(null);
+    loadApiKey();
     setFormModal(true);
   };
 
@@ -164,7 +235,82 @@ export default function ExpensesScreen() {
       car_number: item.car_number ?? '',
       comment:    item.comment === '—' ? '' : item.comment,
     });
+    setInvoiceUri(null);
+    setInvoiceData(null);
+    loadApiKey();
     setFormModal(true);
+  };
+
+  // Выбрать фото счёта
+  const pickInvoice = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Нет доступа', 'Разрешите доступ к галерее'); return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setInvoiceUri(result.assets[0].uri);
+      setInvoiceData(null);
+    }
+  };
+
+  const takeInvoicePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Нет доступа', 'Разрешите доступ к камере'); return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+    if (!result.canceled && result.assets[0]) {
+      setInvoiceUri(result.assets[0].uri);
+      setInvoiceData(null);
+    }
+  };
+
+  // Сканировать счёт
+  const handleScanInvoice = async () => {
+    if (!invoiceUri) { Alert.alert('Ошибка', 'Сначала выберите фото счёта'); return; }
+    if (!apiKeyRef.current) {
+      Alert.alert(
+        'Нет API ключа',
+        'Добавьте Claude API ключ в Настройки компании → поле "Claude API Key"'
+      );
+      return;
+    }
+    setScanning(true);
+    try {
+      const ext = invoiceUri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
+      const base64 = await FileSystem.readAsStringAsync(invoiceUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const parsed = await scanInvoiceWithClaude(base64, mime, apiKeyRef.current);
+      setInvoiceData(parsed);
+
+      // Автозаполнение формы
+      if (parsed.total) setForm(f => ({ ...f, amount: String(parsed.total) }));
+      if (parsed.date && parsed.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        setForm(f => ({ ...f, exp_date: parsed.date }));
+      }
+      const itemNames = (parsed.items ?? [])
+        .map((i: any) => `${i.name} ${i.qty}${i.unit ? ' ' + i.unit : ''}`)
+        .join(', ');
+      const vatNote = parsed.has_vat
+        ? ` (с НДС ${parsed.vat_rate}% = ${parsed.vat_amount} руб.)`
+        : ' (без НДС)';
+      setForm(f => ({
+        ...f,
+        comment: [parsed.supplier, itemNames, vatNote].filter(Boolean).join(' | '),
+      }));
+
+      Alert.alert('Счёт распознан', `Сумма: ${parsed.total} руб.${vatNote}`);
+    } catch (err: any) {
+      Alert.alert('Ошибка сканирования', err.message || 'Не удалось распознать счёт');
+    } finally {
+      setScanning(false);
+    }
   };
 
   const handleSave = async () => {
@@ -364,6 +510,50 @@ export default function ExpensesScreen() {
             <Text style={styles.sheetTitle}>{isEditing ? 'Редактировать расход' : 'Новый расход'}</Text>
             <ScrollView showsVerticalScrollIndicator={false}>
 
+              {/* ── Сканирование счёта ── */}
+              <Text style={styles.fieldLabel}>Счёт на оплату (необязательно)</Text>
+              <View style={styles.invoiceRow}>
+                <TouchableOpacity style={styles.invoiceBtn} onPress={pickInvoice}>
+                  <Text style={styles.invoiceBtnText}>📁 Галерея</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.invoiceBtn} onPress={takeInvoicePhoto}>
+                  <Text style={styles.invoiceBtnText}>📷 Камера</Text>
+                </TouchableOpacity>
+              </View>
+
+              {invoiceUri && (
+                <View style={styles.invoicePreview}>
+                  <Image source={{ uri: invoiceUri }} style={styles.invoiceImage} resizeMode="cover" />
+                  <TouchableOpacity
+                    style={[styles.scanBtn, scanning && { opacity: 0.6 }]}
+                    onPress={handleScanInvoice}
+                    disabled={scanning}
+                  >
+                    {scanning
+                      ? <ActivityIndicator color="white" size="small" />
+                      : <Text style={styles.scanBtnText}>🤖 Распознать счёт</Text>}
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {invoiceData && (
+                <View style={styles.invoiceResult}>
+                  <Text style={styles.invoiceResultTitle}>Распознано из счёта:</Text>
+                  {invoiceData.supplier ? <Text style={styles.invoiceResultRow}>🏢 {invoiceData.supplier}</Text> : null}
+                  {(invoiceData.items ?? []).map((item: any, i: number) => (
+                    <Text key={i} style={styles.invoiceResultRow}>
+                      • {item.name} — {item.qty} {item.unit} × {item.price} = {item.amount} руб.
+                    </Text>
+                  ))}
+                  <Text style={styles.invoiceResultRow}>
+                    💰 Итого: {invoiceData.total} руб.
+                    {invoiceData.has_vat
+                      ? ` (НДС ${invoiceData.vat_rate}% = ${invoiceData.vat_amount} руб.)`
+                      : ' (без НДС)'}
+                  </Text>
+                </View>
+              )}
+
               <Text style={styles.fieldLabel}>Дата (ГГГГ-ММ-ДД) *</Text>
               <TextInput
                 style={styles.input}
@@ -539,6 +729,25 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: 'white', marginBottom: 6,
   },
   carChipActive: { backgroundColor: '#eff6ff', borderColor: '#2563eb' },
+  invoiceRow: { flexDirection: 'row', gap: 10, marginBottom: 8 },
+  invoiceBtn: {
+    flex: 1, backgroundColor: '#f3f4f6', borderWidth: 1.5, borderColor: '#e5e7eb',
+    borderRadius: 8, padding: 10, alignItems: 'center',
+  },
+  invoiceBtnText: { fontSize: 13, color: '#374151', fontWeight: '500' },
+  invoicePreview: { marginBottom: 10 },
+  invoiceImage: { width: '100%', height: 160, borderRadius: 8, marginBottom: 8 },
+  scanBtn: {
+    backgroundColor: '#7c3aed', padding: 12, borderRadius: 8,
+    alignItems: 'center',
+  },
+  scanBtnText: { color: 'white', fontSize: 14, fontWeight: '600' },
+  invoiceResult: {
+    backgroundColor: '#f0fdf4', borderRadius: 8, padding: 12,
+    marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#16a34a',
+  },
+  invoiceResultTitle: { fontSize: 13, fontWeight: '700', color: '#166534', marginBottom: 6 },
+  invoiceResultRow: { fontSize: 12, color: '#374151', marginBottom: 3 },
   saveBtn: { backgroundColor: '#2563eb', padding: 16, borderRadius: 8, alignItems: 'center' },
   saveBtnText: { color: 'white', fontSize: 16, fontWeight: '600' },
   cancelBtn: { padding: 14, alignItems: 'center' },

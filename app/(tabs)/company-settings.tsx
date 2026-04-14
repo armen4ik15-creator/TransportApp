@@ -15,10 +15,17 @@ import {
 import { getCompanySettings, upsertCompanySettings } from '../constants/queries';
 
 const TAX_REGIMES = [
-  { value: 'usn_6',  label: 'УСН 6%\n(доходы)' },
-  { value: 'usn_15', label: 'УСН 15%\n(доходы-расходы)' },
-  { value: 'osn',    label: 'ОСН' },
-  { value: 'patent', label: 'Патент' },
+  { value: 'usn_6',   label: 'УСН 6%\n(доходы)' },
+  { value: 'usn_15',  label: 'УСН 15%\n(доходы − расходы)' },
+  { value: 'osn',     label: 'ОСН\n(общая система)' },
+  { value: 'patent',  label: 'ПСН\n(патент)' },
+  { value: 'eshn',    label: 'ЕСХН\n(сельхоз 6%)' },
+  { value: 'npd',     label: 'НПД\n(самозанятый)' },
+];
+
+const NPD_RATES = [
+  { value: '4',  label: '4% — физлица' },
+  { value: '6',  label: '6% — юрлица/ИП' },
 ];
 
 const EMPTY: Record<string, string> = {
@@ -26,13 +33,15 @@ const EMPTY: Record<string, string> = {
   inn: '', kpp: '', ogrn: '',
   tax_regime: 'usn_15',
   usn_rate: '',
-  vat_rate: '20',
+  vat_rate: '22',
   has_vat: 'false',
   social_rate: '30.2',
+  npd_rate: '6',
   bank_name: '', bik: '', account: '', corr_account: '',
   legal_address: '', actual_address: '',
   director_name: '', accountant_name: '',
   phone: '', email: '',
+  claude_api_key: '',
 };
 
 export default function CompanySettingsScreen() {
@@ -54,7 +63,8 @@ export default function CompanySettingsScreen() {
           ogrn:            data.ogrn ?? '',
           tax_regime:      data.tax_regime ?? 'usn_15',
           usn_rate:        data.usn_rate != null ? String(data.usn_rate) : '',
-          vat_rate:        data.vat_rate != null ? String(data.vat_rate) : '20',
+          vat_rate:        data.vat_rate != null ? String(data.vat_rate) : '22',
+        npd_rate:        data.npd_rate != null ? String(data.npd_rate) : '6',
           has_vat:         String(data.has_vat ?? false),
           social_rate:     data.social_rate != null ? String(data.social_rate) : '30.2',
           bank_name:       data.bank_name ?? '',
@@ -67,6 +77,7 @@ export default function CompanySettingsScreen() {
           accountant_name: data.accountant_name ?? '',
           phone:           data.phone ?? '',
           email:           data.email ?? '',
+          claude_api_key:  data.claude_api_key ?? '',
         });
       }
     } catch (err) {
@@ -92,6 +103,7 @@ export default function CompanySettingsScreen() {
         vat_rate:        form.vat_rate ? parseFloat(form.vat_rate) : 20,
         has_vat:         form.has_vat === 'true',
         social_rate:     form.social_rate ? parseFloat(form.social_rate) : 30.2,
+        npd_rate:        form.npd_rate ? parseFloat(form.npd_rate) : 6,
         bank_name:       form.bank_name.trim() || null,
         bik:             form.bik.trim() || null,
         account:         form.account.trim() || null,
@@ -102,6 +114,7 @@ export default function CompanySettingsScreen() {
         accountant_name: form.accountant_name.trim() || null,
         phone:           form.phone.trim() || null,
         email:           form.email.trim() || null,
+        claude_api_key:  form.claude_api_key.trim() || null,
       };
       await upsertCompanySettings(payload);
       Alert.alert('Сохранено', 'Настройки компании обновлены');
@@ -165,6 +178,18 @@ export default function CompanySettingsScreen() {
 
             <Text style={styles.label}>Email</Text>
             <TextInput style={styles.input} value={f('email')} onChangeText={set('email')} placeholder="company@example.com" keyboardType="email-address" />
+
+            <Text style={styles.label}>Claude API Key (для сканирования счётов)</Text>
+            <TextInput
+              style={styles.input}
+              value={f('claude_api_key')}
+              onChangeText={set('claude_api_key')}
+              placeholder="sk-ant-..."
+              secureTextEntry
+            />
+            <Text style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+              Получить ключ: console.anthropic.com → API Keys
+            </Text>
           </View>
 
           {/* Налоговый режим */}
@@ -198,6 +223,46 @@ export default function CompanySettingsScreen() {
                   placeholder={f('tax_regime') === 'usn_6' ? '6' : '15'}
                 />
               </>
+            )}
+            {f('tax_regime') === 'eshn' && (
+              <>
+                <Text style={styles.label}>Ставка ЕСХН (%, стандарт 6%)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={f('usn_rate') || '6'}
+                  onChangeText={set('usn_rate')}
+                  keyboardType="decimal-pad"
+                  placeholder="6"
+                />
+              </>
+            )}
+            {f('tax_regime') === 'npd' && (
+              <>
+                <Text style={styles.label}>Ставка НПД</Text>
+                <View style={styles.boolRow}>
+                  {NPD_RATES.map(r => (
+                    <TouchableOpacity
+                      key={r.value}
+                      style={[styles.boolBtn, f('npd_rate') === r.value && styles.boolBtnActive]}
+                      onPress={() => set('npd_rate')(r.value)}
+                    >
+                      <Text style={[styles.boolBtnText, f('npd_rate') === r.value && styles.boolBtnTextActive]}>
+                        {r.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
+            {f('tax_regime') === 'osn' && (
+              <View style={styles.infoBox}>
+                <Text style={styles.infoText}>ОСН: налог на прибыль 20%, НДС 22%, НДФЛ 13/15%</Text>
+              </View>
+            )}
+            {f('tax_regime') === 'patent' && (
+              <View style={styles.infoBox}>
+                <Text style={styles.infoText}>ПСН: стоимость патента рассчитывается в ФНС. Укажите годовую сумму патента в комментарии.</Text>
+              </View>
             )}
 
             <Text style={styles.label}>Ставка страховых взносов с ФОТ (%)</Text>
@@ -333,6 +398,10 @@ const styles = StyleSheet.create({
   boolBtnActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
   boolBtnText: { fontSize: 14, color: '#374151', fontWeight: '500' },
   boolBtnTextActive: { color: 'white', fontWeight: '700' },
+  infoBox: {
+    backgroundColor: '#fef3c7', borderRadius: 8, padding: 10, marginTop: 8,
+  },
+  infoText: { fontSize: 13, color: '#92400e' },
   saveBtn: {
     backgroundColor: '#2563eb', padding: 16, borderRadius: 12,
     alignItems: 'center', marginTop: 20, elevation: 2,

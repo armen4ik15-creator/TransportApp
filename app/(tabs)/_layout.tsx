@@ -14,78 +14,75 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: 'Главная',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🏠</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🏠</Text>,
         }}
       />
       <Tabs.Screen
         name="customers"
         options={{
           title: 'Контрагенты',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>💰</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>💰</Text>,
         }}
       />
       <Tabs.Screen
         name="drivers"
         options={{
           title: 'Водители',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>👤</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>👤</Text>,
         }}
       />
       <Tabs.Screen
         name="expenses"
         options={{
           title: 'Расходы',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>💸</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>💸</Text>,
         }}
       />
       <Tabs.Screen
         name="orders"
         options={{
           title: 'Заказы',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>📦</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>📦</Text>,
         }}
       />
       <Tabs.Screen
         name="registry"
         options={{
           title: 'Реестр',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>📑</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>📑</Text>,
         }}
       />
       <Tabs.Screen
-        name="reports"
+        name="all-finances"
         options={{
-          title: 'Отчеты',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>📊</Text>,
-        }}
-      />
-      <Tabs.Screen
-        name="salary"
-        options={{
-          title: 'Зарплата',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>💵</Text>,
-        }}
-      />
-      <Tabs.Screen
-        name="finance"
-        options={{
-          title: 'Финансы',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>📈</Text>,
-        }}
-      />
-      <Tabs.Screen
-        name="taxes"
-        options={{
-          title: 'Налоги',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🏛</Text>,
+          title: 'Все финансы',
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>💼</Text>,
         }}
       />
       <Tabs.Screen
         name="company-settings"
         options={{
           title: 'Компания',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>⚙️</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>⚙️</Text>,
         }}
+      />
+
+      {/* Скрыты из таббара — открываются через "Все финансы" */}
+      <Tabs.Screen
+        name="reports"
+        options={{ href: null, title: 'Отчёты' }}
+      />
+      <Tabs.Screen
+        name="salary"
+        options={{ href: null, title: 'Зарплата' }}
+      />
+      <Tabs.Screen
+        name="finance"
+        options={{ href: null, title: 'Финансы' }}
+      />
+      <Tabs.Screen
+        name="taxes"
+        options={{ href: null, title: 'Налоги' }}
       />
     </Tabs>
   );
