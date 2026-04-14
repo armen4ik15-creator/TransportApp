@@ -66,6 +66,27 @@ export default function TabsLayout() {
           tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>💵</Text>,
         }}
       />
+      <Tabs.Screen
+        name="finance"
+        options={{
+          title: 'Финансы',
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>📈</Text>,
+        }}
+      />
+      <Tabs.Screen
+        name="taxes"
+        options={{
+          title: 'Налоги',
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🏛</Text>,
+        }}
+      />
+      <Tabs.Screen
+        name="company-settings"
+        options={{
+          title: 'Компания',
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>⚙️</Text>,
+        }}
+      />
     </Tabs>
   );
 }

@@ -2,7 +2,7 @@
   "expo": {
     "name": "РеестрПро",
     "slug": "TransportApp",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "transportapp",
@@ -14,7 +14,7 @@
     },
     "android": {
       "package": "com.reestpro.transport",
-      "versionCode": 1,
+      "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

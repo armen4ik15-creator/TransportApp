@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"require\\('xlsx'\\); console.log\\('xlsx OK'\\)\")",
+      "Bash(node -e \"require\\('expo-file-system'\\); console.log\\('file-system OK'\\)\")",
+      "Bash(node -e \"require\\('expo-sharing'\\); console.log\\('sharing OK'\\)\")",
+      "Bash(node -e \"require\\('canvas'\\)\")",
+      "Bash(node -e \"require\\('sharp'\\)\")",
+      "Bash(py -m pip install pandas openpyxl)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(py -c ':*)"
+    ]
+  }
+}

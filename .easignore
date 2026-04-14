@@ -1,0 +1,17 @@
+node_modules
+.git
+*.log
+android
+ios
+.expo
+dist
+web-build
+coverage
+__tests__
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+.vscode
+*.md
+*.map

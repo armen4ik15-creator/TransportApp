@@ -1,17 +1,18 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    Alert,
-    Modal,
-    ScrollView,
-    Share,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { getDrivers, getRegistryData } from '../constants/queries';
+import * as XLSX from 'xlsx';
+import { getDrivers, getRegistryDataV2 } from '../constants/queries';
+import { saveAndShareExcel } from '../utils/exportExcel';
 
 export default function RegistryScreen() {
   const [dateFrom, setDateFrom] = useState('');
@@ -20,97 +21,19 @@ export default function RegistryScreen() {
   const [cars, setCars] = useState<{ car_number: string; driver_name: string }[]>([]);
   const [selectedCar, setSelectedCar] = useState('');
   const [loading, setLoading] = useState(false);
-  const [csvContent, setCsvContent] = useState('');
-  const [modalVisible, setModalVisible] = useState(false);
 
-  useEffect(() => {
-    loadCars();
-  }, []);
+  useEffect(() => { loadCars(); }, []);
 
   const loadCars = async () => {
     try {
       const drivers = await getDrivers();
-      const carsList = drivers
-        .filter(d => d.car_number)
-        .map(d => ({ car_number: d.car_number, driver_name: d.full_name }));
-      setCars(carsList);
+      setCars(
+        drivers
+          .filter((d: any) => d.car_number)
+          .map((d: any) => ({ car_number: d.car_number, driver_name: d.full_name }))
+      );
     } catch (error) {
       console.error('Error loading cars:', error);
-    }
-  };
-
-  const handleExport = async () => {
-    if (!dateFrom || !dateTo) {
-      Alert.alert('Ошибка', 'Укажите период (даты в формате ГГГГ-ММ-ДД)');
-      return;
-    }
-    if (registryType === 'by_car' && !selectedCar) {
-      Alert.alert('Ошибка', 'Выберите машину');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const data = await getRegistryData(
-        dateFrom,
-        dateTo,
-        registryType === 'by_car' ? selectedCar : undefined
-      );
-
-      if (data.length === 0) {
-        Alert.alert('Нет данных', 'За выбранный период нет рейсов');
-        setLoading(false);
-        return;
-      }
-
-      const headers = [
-        'Дата', 'Номер ТТН', 'Машина', 'Водитель', 'Материал', 'Заказчик',
-        'Отправитель', 'Получатель', 'Погрузка', 'Выгрузка', 'Расстояние (км)',
-        'Ед. изм.', 'Объём', 'Ставка водителя', 'Ставка компании', 'Выручка',
-      ];
-      const rows = data.map(item => [
-        item.trip_date,
-        item.ttn_number,
-        item.car_number,
-        item.driver_name,
-        item.material,
-        item.customer,
-        item.sender || '',
-        item.receiver || '',
-        item.load_address,
-        item.unload_address,
-        item.distance_km,
-        item.unit,
-        item.volume,
-        item.driver_rate,
-        item.company_rate,
-        (item.company_rate * item.volume).toFixed(2),
-      ]);
-
-      const csv = [
-        headers.join(','),
-        ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
-      ].join('\n');
-
-      setCsvContent(csv);
-      setModalVisible(true);
-    } catch (error) {
-      console.error(error);
-      Alert.alert('Ошибка', 'Не удалось сформировать реестр');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const copyToClipboard = async () => {
-    try {
-      await Share.share({
-        message: csvContent,
-        title: 'Реестр',
-      });
-      setModalVisible(false);
-    } catch (error) {
-      Alert.alert('Ошибка', 'Не удалось поделиться');
     }
   };
 
@@ -120,6 +43,103 @@ export default function RegistryScreen() {
     start.setDate(today.getDate() - days + 1);
     setDateFrom(start.toISOString().split('T')[0]);
     setDateTo(today.toISOString().split('T')[0]);
+  };
+
+  const handleExport = async () => {
+    if (!dateFrom || !dateTo) {
+      Alert.alert('Ошибка', 'Укажите период (ГГГГ-ММ-ДД)');
+      return;
+    }
+    if (registryType === 'by_car' && !selectedCar) {
+      Alert.alert('Ошибка', 'Выберите машину');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const data = await getRegistryDataV2(
+        dateFrom,
+        dateTo,
+        registryType === 'by_car' ? selectedCar : undefined
+      );
+
+      if (data.length === 0) {
+        Alert.alert('Нет данных', 'За выбранный период нет рейсов');
+        return;
+      }
+
+      // ── Лист1: формат как в образце ──────────────────────────
+      const headers = [
+        'Дата',
+        'Номер ТН',
+        'Номер Машины',
+        'ФИО водителя',
+        'Материал',
+        'Контрагент',
+        'Погрузка',
+        'Выгрузка',
+        'Плечо',
+        'Ставка водителя',
+        'Ставка за м3-т',
+        'Единица Измерения',
+        'Всего',
+        'Сумма',
+        'Нал',
+      ];
+
+      const rows = data.map((item: any) => [
+        item.trip_date,
+        item.ttn_number,
+        item.car_number,
+        item.driver_name,
+        item.material,
+        item.customer,
+        item.load_address,
+        item.unload_address,
+        item.distance_km,
+        item.driver_rate,
+        item.company_rate,
+        item.unit,
+        item.volume,
+        parseFloat((item.company_rate * item.volume).toFixed(2)),
+        item.payment_method === 'cash' ? 'Да' : '',
+      ]);
+
+      // Итоговая строка
+      const totalVolume  = data.reduce((s: number, r: any) => s + (r.volume ?? 0), 0);
+      const totalRevenue = data.reduce((s: number, r: any) => s + (r.company_rate ?? 0) * (r.volume ?? 0), 0);
+      const totalCash    = data.reduce((s: number, r: any) =>
+        s + (r.payment_method === 'cash' ? (r.company_rate ?? 0) * (r.volume ?? 0) : 0), 0);
+
+      const totalsRow = [
+        `Итого (${data.length} рейсов)`, '', '', '', '', '', '', '', '', '', '',
+        '',
+        parseFloat(totalVolume.toFixed(3)),
+        parseFloat(totalRevenue.toFixed(2)),
+        parseFloat(totalCash.toFixed(2)),
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows, [], totalsRow]);
+
+      // Ширины столбцов
+      ws['!cols'] = [
+        { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 22 }, { wch: 14 },
+        { wch: 20 }, { wch: 25 }, { wch: 25 }, { wch: 8 },
+        { wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 6 },
+      ];
+
+      const wb = XLSX.utils.book_new();
+      const sheetName = registryType === 'by_car' ? `Лист1_${selectedCar}` : 'Лист1';
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+      const filename = `registry_${dateFrom}_${dateTo}${registryType === 'by_car' ? '_' + selectedCar : ''}.xlsx`;
+      await saveAndShareExcel(wb, filename);
+    } catch (error: any) {
+      console.error(error);
+      Alert.alert('Ошибка', error.message || 'Не удалось сформировать реестр');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -133,115 +153,108 @@ export default function RegistryScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
+        {/* Быстрый выбор */}
         <Text style={styles.label}>Быстрый выбор периода</Text>
         <View style={styles.quickButtons}>
-          <TouchableOpacity style={styles.quickBtn} onPress={() => setQuickPeriod(1)}>
-            <Text>Сегодня</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickBtn} onPress={() => setQuickPeriod(7)}>
-            <Text>7 дней</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickBtn} onPress={() => setQuickPeriod(30)}>
-            <Text>30 дней</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickBtn} onPress={() => setQuickPeriod(90)}>
-            <Text>90 дней</Text>
-          </TouchableOpacity>
+          {[
+            { label: 'Сегодня', days: 1 },
+            { label: '7 дней', days: 7 },
+            { label: '30 дней', days: 30 },
+            { label: '90 дней', days: 90 },
+          ].map(btn => (
+            <TouchableOpacity key={btn.days} style={styles.quickBtn} onPress={() => setQuickPeriod(btn.days)}>
+              <Text style={styles.quickBtnText}>{btn.label}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
-        <Text style={styles.label}>Дата ОТ (ГГГГ-ММ-ДД)</Text>
+        {/* Период вручную */}
+        <Text style={styles.label}>Дата С (ГГГГ-ММ-ДД)</Text>
         <TextInput
           style={styles.input}
-          placeholder="2026-03-01"
+          placeholder="2026-04-01"
           value={dateFrom}
           onChangeText={setDateFrom}
         />
 
-        <Text style={styles.label}>Дата ДО (ГГГГ-ММ-ДД)</Text>
+        <Text style={styles.label}>Дата ПО (ГГГГ-ММ-ДД)</Text>
         <TextInput
           style={styles.input}
-          placeholder="2026-03-31"
+          placeholder="2026-04-30"
           value={dateTo}
           onChangeText={setDateTo}
         />
 
+        {/* Тип реестра */}
         <Text style={styles.label}>Тип реестра</Text>
         <View style={styles.rowButtons}>
           <TouchableOpacity
-            style={[styles.choiceButton, registryType === 'all' && styles.selectedButton]}
+            style={[styles.choiceBtn, registryType === 'all' && styles.choiceBtnActive]}
             onPress={() => setRegistryType('all')}
           >
-            <Text>📊 Общий</Text>
+            <Text style={[styles.choiceBtnText, registryType === 'all' && styles.choiceBtnTextActive]}>
+              📊 Общий
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.choiceButton, registryType === 'by_car' && styles.selectedButton]}
+            style={[styles.choiceBtn, registryType === 'by_car' && styles.choiceBtnActive]}
             onPress={() => setRegistryType('by_car')}
           >
-            <Text>🚚 По машине</Text>
+            <Text style={[styles.choiceBtnText, registryType === 'by_car' && styles.choiceBtnTextActive]}>
+              🚚 По машине
+            </Text>
           </TouchableOpacity>
         </View>
 
+        {/* Выбор машины */}
         {registryType === 'by_car' && (
           <>
             <Text style={styles.label}>Выберите машину</Text>
-            <View style={styles.carsList}>
-              {cars.map(car => (
+            {cars.length === 0 ? (
+              <Text style={styles.emptyText}>Нет машин</Text>
+            ) : (
+              cars.map(car => (
                 <TouchableOpacity
                   key={car.car_number}
-                  style={[styles.carOption, selectedCar === car.car_number && styles.selectedCar]}
+                  style={[styles.carOption, selectedCar === car.car_number && styles.carOptionActive]}
                   onPress={() => setSelectedCar(car.car_number)}
                 >
-                  <Text>{car.car_number} ({car.driver_name})</Text>
+                  <Text style={selectedCar === car.car_number ? styles.carOptionTextActive : styles.carOptionText}>
+                    🚛 {car.car_number}
+                  </Text>
+                  <Text style={styles.carDriver}>{car.driver_name}</Text>
                 </TouchableOpacity>
-              ))}
-            </View>
+              ))
+            )}
           </>
         )}
 
+        {/* Кнопка экспорта */}
         <TouchableOpacity
-          style={[styles.exportButton, loading && styles.disabledButton]}
+          style={[styles.exportBtn, loading && styles.exportBtnDisabled]}
           onPress={handleExport}
           disabled={loading}
         >
-          <Text style={styles.exportButtonText}>
-            {loading ? 'Генерация...' : '📑 Сформировать реестр'}
-          </Text>
+          {loading
+            ? <ActivityIndicator color="white" />
+            : (
+              <>
+                <Text style={styles.exportBtnIcon}>📥</Text>
+                <Text style={styles.exportBtnText}>Скачать реестр Excel (.xlsx)</Text>
+              </>
+            )}
         </TouchableOpacity>
-      </ScrollView>
 
-      <Modal visible={modalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Реестр (CSV)</Text>
-            <ScrollView style={styles.csvContainer}>
-              <Text selectable style={styles.csvText}>
-                {csvContent}
-              </Text>
-            </ScrollView>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalButton} onPress={copyToClipboard}>
-                <Text style={styles.modalButtonText}>📤 Поделиться</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.closeButton]}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.closeButtonText}>Закрыть</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        <Text style={styles.hint}>
+          Файл откроется в Excel, Google Таблицах или любом совместимом приложении
+        </Text>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-    padding: 16,
-  },
+  container: { flex: 1, backgroundColor: '#f5f5f5', padding: 16 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -249,20 +262,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     marginTop: 8,
   },
-  back: {
-    color: '#2563eb',
-    fontSize: 16,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginTop: 16,
-    marginBottom: 8,
-  },
+  back: { color: '#2563eb', fontSize: 16 },
+  title: { fontSize: 20, fontWeight: 'bold' },
+  label: { fontSize: 15, fontWeight: '500', marginTop: 16, marginBottom: 8, color: '#374151' },
   input: {
     borderWidth: 1,
     borderColor: '#d1d5db',
@@ -271,40 +273,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: 'white',
   },
-  quickButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 8,
-  },
+  quickButtons: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   quickBtn: {
     backgroundColor: '#e5e7eb',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    flex: 1,
-  },
-  rowButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  choiceButton: {
-    backgroundColor: '#f3f4f6',
     paddingVertical: 10,
+    paddingHorizontal: 8,
     borderRadius: 8,
     flex: 1,
     alignItems: 'center',
   },
-  selectedButton: {
-    backgroundColor: '#2563eb',
+  quickBtnText: { fontSize: 13, color: '#374151', fontWeight: '500' },
+  rowButtons: { flexDirection: 'row', gap: 12 },
+  choiceBtn: {
+    backgroundColor: '#f3f4f6',
+    paddingVertical: 12,
+    borderRadius: 8,
+    flex: 1,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
-  carsList: {
-    marginTop: 8,
-    maxHeight: 200,
-  },
+  choiceBtnActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
+  choiceBtnText: { fontSize: 14, color: '#374151', fontWeight: '500' },
+  choiceBtnTextActive: { color: 'white' },
   carOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     backgroundColor: 'white',
     padding: 12,
     borderRadius: 8,
@@ -312,78 +307,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
-  selectedCar: {
-    backgroundColor: '#e0f2fe',
-    borderColor: '#2563eb',
-  },
-  exportButton: {
-    backgroundColor: '#2563eb',
+  carOptionActive: { backgroundColor: '#eff6ff', borderColor: '#2563eb' },
+  carOptionText: { fontSize: 15, color: '#374151', fontWeight: '500' },
+  carOptionTextActive: { fontSize: 15, color: '#2563eb', fontWeight: '600' },
+  carDriver: { fontSize: 13, color: '#6b7280' },
+  exportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#16a34a',
     padding: 16,
     borderRadius: 12,
-    alignItems: 'center',
     marginTop: 24,
-    marginBottom: 40,
-  },
-  disabledButton: {
-    backgroundColor: '#9ca3af',
-  },
-  exportButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: 'white',
-    borderRadius: 20,
-    padding: 20,
-    width: '90%',
-    maxHeight: '80%',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
     marginBottom: 12,
+    gap: 8,
+  },
+  exportBtnDisabled: { backgroundColor: '#9ca3af' },
+  exportBtnIcon: { fontSize: 20 },
+  exportBtnText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  emptyText: { color: '#6b7280', textAlign: 'center', marginTop: 8 },
+  hint: {
     textAlign: 'center',
-  },
-  csvContainer: {
-    maxHeight: 400,
-    marginBottom: 16,
-    backgroundColor: '#f9fafb',
-    borderRadius: 8,
-    padding: 8,
-  },
-  csvText: {
-    fontFamily: 'monospace',
     fontSize: 12,
-    color: '#1f2937',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  modalButton: {
-    flex: 1,
-    backgroundColor: '#2563eb',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  modalButtonText: {
-    color: 'white',
-    fontWeight: '600',
-  },
-  closeButton: {
-    backgroundColor: '#e5e7eb',
-  },
-  closeButtonText: {
-    color: '#1f2937',
-    fontWeight: '600',
+    color: '#9ca3af',
+    marginBottom: 40,
   },
 });
