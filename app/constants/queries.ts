@@ -15,6 +15,17 @@ export const addDriver = async (_full_name: string, _car_number: string) => {
   throw new Error('Добавление водителей выполняется через Supabase Dashboard');
 };
 
+export const updateDriverCarNumber = async (driverId: string, carNumber: string) => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ car_number: carNumber.trim().toUpperCase() })
+    .eq('id', driverId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+};
+
 // ========== КОНТРАГЕНТЫ (справочник) ==========
 export const getCustomersList = async () => {
   const { data, error } = await supabase
