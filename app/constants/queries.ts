@@ -227,6 +227,42 @@ export const deactivateOrder = async (id: number) => {
   return true;
 };
 
+export const reactivateOrder = async (id: number) => {
+  const { data, error } = await supabase
+    .from('orders')
+    .update({ is_active: true })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+export const getArchivedOrders = async () => {
+  const { data: orders, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('is_active', false)
+    .order('id', { ascending: false });
+  if (error) throw error;
+  if (!orders || orders.length === 0) return [];
+
+  const driverIds = [...new Set(orders.map((o: any) => o.driver_id).filter(Boolean))];
+  let profileMap: Record<string, any> = {};
+  if (driverIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, full_name, car_number')
+      .in('id', driverIds);
+    profileMap = Object.fromEntries((profiles ?? []).map((p: any) => [p.id, p]));
+  }
+
+  return orders.map((o: any) => ({
+    ...o,
+    driver_name: profileMap[o.driver_id]?.full_name ?? null,
+  }));
+};
+
 // ========== ЗАРПЛАТА ==========
 // driverId — UUID из таблицы profiles/auth.users
 export const getDriverEarnings = async (driverId: string, dateFrom?: string, dateTo?: string) => {

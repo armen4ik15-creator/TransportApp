@@ -12,7 +12,16 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { addOrder, deactivateOrder, getActiveOrders, getCustomers, getDrivers, updateOrder } from '../constants/queries';
+import {
+  addOrder,
+  deactivateOrder,
+  getActiveOrders,
+  getArchivedOrders,
+  getCustomers,
+  getDrivers,
+  reactivateOrder,
+  updateOrder,
+} from '../constants/queries';
 import { useAuth } from '../context/AuthContext';
 
 interface Order {
@@ -36,12 +45,17 @@ interface Order {
   is_active: boolean;
 }
 
+type Tab = 'active' | 'archive';
+
 export default function OrdersScreen() {
   const { user } = useAuth();
-  const [orders, setOrders] = useState<Order[]>([]);
+
+  const [tab, setTab] = useState<Tab>('active');
+  const [activeOrders, setActiveOrders] = useState<Order[]>([]);
+  const [archivedOrders, setArchivedOrders] = useState<Order[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [driverFilter, setDriverFilter] = useState<string>(''); // '' = все водители
-  const [customerFilter, setCustomerFilter] = useState<string>(''); // '' = все заказчики
+  const [driverFilter, setDriverFilter] = useState<string>('');
+  const [customerFilter, setCustomerFilter] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -76,22 +90,25 @@ export default function OrdersScreen() {
   const loadInitialData = async () => {
     setLoading(true);
     try {
-      const [ordersData, driversData, customersData] = await Promise.all([
+      const [activeData, archiveData, driversData, customersData] = await Promise.all([
         getActiveOrders(),
+        getArchivedOrders(),
         getDrivers(),
         getCustomers(),
       ]);
-      setOrders(ordersData);
+      setActiveOrders(activeData as Order[]);
+      setArchivedOrders(archiveData as Order[]);
       setDrivers(driversData);
       setCustomers(customersData);
-    } catch (error) {
+    } catch {
       Alert.alert('Ошибка', 'Не удалось загрузить данные');
     } finally {
       setLoading(false);
     }
   };
 
-  // Вычисляем отфильтрованные заказы
+  const orders = tab === 'active' ? activeOrders : archivedOrders;
+
   const filteredOrders = orders.filter(o => {
     if (driverFilter && o.driver_id !== driverFilter) return false;
     if (customerFilter && o.customer !== customerFilter) return false;
@@ -106,9 +123,9 @@ export default function OrdersScreen() {
     return true;
   });
 
-  // Уникальные заказчики из текущих заказов
   const uniqueCustomers = [...new Set(orders.map(o => o.customer).filter(Boolean))].sort();
 
+  // ── Создать задачу ──────────────────────────────────────────────────────────
   const handleCreateOrder = async () => {
     if (!formData.driver_id) { Alert.alert('Ошибка', 'Выберите водителя'); return; }
     if (!formData.customer) { Alert.alert('Ошибка', 'Выберите заказчика'); return; }
@@ -122,42 +139,41 @@ export default function OrdersScreen() {
     const driver = drivers.find(d => d.id === formData.driver_id);
     if (!driver) { Alert.alert('Ошибка', 'Водитель не найден'); return; }
 
-    const newOrder = {
-      driver_id: formData.driver_id,
-      created_by: user?.id,
-      car_number: driver.car_number,
-      task_name: formData.task_name || null,
-      customer: formData.customer,
-      material: formData.material,
-      load_address: formData.load_address,
-      unload_address: formData.unload_address,
-      distance_km: parseFloat(formData.distance_km),
-      unit: formData.unit,
-      total_planned_volume: formData.total_planned_volume ? parseFloat(formData.total_planned_volume) : null,
-      company_rate: parseFloat(formData.company_rate),
-      driver_rate: parseFloat(formData.driver_rate),
-      sender: formData.sender || null,
-      receiver: formData.receiver || null,
-      is_active: true,
-    };
-
     try {
-      const created = await addOrder(newOrder);
-      setOrders([created, ...orders]);
+      const created = await addOrder({
+        driver_id: formData.driver_id,
+        created_by: user?.id,
+        car_number: driver.car_number,
+        task_name: formData.task_name || null,
+        customer: formData.customer,
+        material: formData.material,
+        load_address: formData.load_address,
+        unload_address: formData.unload_address,
+        distance_km: parseFloat(formData.distance_km),
+        unit: formData.unit,
+        total_planned_volume: formData.total_planned_volume ? parseFloat(formData.total_planned_volume) : null,
+        company_rate: parseFloat(formData.company_rate),
+        driver_rate: parseFloat(formData.driver_rate),
+        sender: formData.sender || null,
+        receiver: formData.receiver || null,
+        is_active: true,
+      });
+      setActiveOrders([{ ...created, driver_name: driver.full_name }, ...activeOrders]);
       setModalVisible(false);
       resetForm();
-      Alert.alert('Успех', 'Задача создана');
+      Alert.alert('Успех', 'Задача создана и назначена водителю');
     } catch (error: any) {
       Alert.alert('Ошибка', error?.message ?? 'Не удалось создать задачу');
     }
   };
 
+  // ── Редактировать задачу ────────────────────────────────────────────────────
   const handleEditOrder = async () => {
     if (!selectedOrder) return;
     if (!editFormData.customer?.trim()) { Alert.alert('Ошибка', 'Укажите заказчика'); return; }
     if (!editFormData.material?.trim()) { Alert.alert('Ошибка', 'Укажите материал'); return; }
     try {
-      const updateData = {
+      const updated = await updateOrder(selectedOrder.id, {
         task_name: editFormData.task_name || null,
         customer: editFormData.customer,
         material: editFormData.material,
@@ -170,9 +186,14 @@ export default function OrdersScreen() {
         driver_rate: parseFloat(editFormData.driver_rate) || 0,
         sender: editFormData.sender || null,
         receiver: editFormData.receiver || null,
-      };
-      const updated = await updateOrder(selectedOrder.id, updateData);
-      setOrders(orders.map(o => o.id === selectedOrder.id ? { ...updated, driver_name: o.driver_name } : o));
+      });
+
+      const patchList = (list: Order[]) =>
+        list.map(o => o.id === selectedOrder.id ? { ...updated, driver_name: o.driver_name } : o);
+
+      if (selectedOrder.is_active) setActiveOrders(patchList(activeOrders));
+      else setArchivedOrders(patchList(archivedOrders));
+
       setEditModalVisible(false);
       setSelectedOrder(null);
       Alert.alert('Успех', 'Задача обновлена');
@@ -181,19 +202,62 @@ export default function OrdersScreen() {
     }
   };
 
-  const openDuplicateModal = (order: Order) => {
-    setSelectedOrder(order);
-    setDuplicateDriverId(null);
-    setDuplicateModalVisible(true);
+  // ── В архив ─────────────────────────────────────────────────────────────────
+  const handleArchiveOrder = (order: Order) => {
+    Alert.alert(
+      'В архив',
+      `Снять задачу "${order.task_name || order.customer}" и отправить в архив?\n\nИз архива её можно будет восстановить в любой момент.`,
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'В архив',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deactivateOrder(order.id);
+              setActiveOrders(activeOrders.filter(o => o.id !== order.id));
+              setArchivedOrders([{ ...order, is_active: false }, ...archivedOrders]);
+              Alert.alert('Готово', 'Задача перемещена в архив');
+            } catch {
+              Alert.alert('Ошибка', 'Не удалось отправить в архив');
+            }
+          },
+        },
+      ]
+    );
   };
 
+  // ── Восстановить из архива ───────────────────────────────────────────────────
+  const handleRestoreOrder = (order: Order) => {
+    Alert.alert(
+      'Восстановить',
+      `Вернуть задачу "${order.task_name || order.customer}" водителю ${order.driver_name || ''}?`,
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Восстановить',
+          onPress: async () => {
+            try {
+              const restored = await reactivateOrder(order.id);
+              setArchivedOrders(archivedOrders.filter(o => o.id !== order.id));
+              setActiveOrders([{ ...restored, driver_name: order.driver_name }, ...activeOrders]);
+              Alert.alert('Готово', 'Задача снова активна');
+            } catch {
+              Alert.alert('Ошибка', 'Не удалось восстановить задачу');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // ── Дублировать ──────────────────────────────────────────────────────────────
   const handleDuplicateOrder = async () => {
-    if (!selectedOrder) return;
-    if (!duplicateDriverId) { Alert.alert('Ошибка', 'Выберите водителя'); return; }
+    if (!selectedOrder || !duplicateDriverId) { Alert.alert('Ошибка', 'Выберите водителя'); return; }
     const driver = drivers.find(d => d.id === duplicateDriverId);
     if (!driver) return;
     try {
-      const newOrder = {
+      const created = await addOrder({
         driver_id: duplicateDriverId,
         created_by: user?.id,
         car_number: driver.car_number,
@@ -210,37 +274,14 @@ export default function OrdersScreen() {
         sender: selectedOrder.sender || null,
         receiver: selectedOrder.receiver || null,
         is_active: true,
-      };
-      const created = await addOrder(newOrder);
-      setOrders([created, ...orders]);
+      });
+      setActiveOrders([{ ...created, driver_name: driver.full_name }, ...activeOrders]);
       setDuplicateModalVisible(false);
       setSelectedOrder(null);
       Alert.alert('Успех', 'Задача продублирована для ' + driver.full_name);
     } catch (error: any) {
       Alert.alert('Ошибка', error?.message || 'Не удалось продублировать задачу');
     }
-  };
-
-  const handleDeactivateOrder = async (order: Order) => {
-    Alert.alert(
-      'Снять задачу',
-      `Снять задачу "${order.task_name || order.customer}"?`,
-      [
-        { text: 'Отмена', style: 'cancel' },
-        {
-          text: 'Да',
-          onPress: async () => {
-            try {
-              await deactivateOrder(order.id);
-              setOrders(orders.filter(o => o.id !== order.id));
-              Alert.alert('Готово', 'Задача снята');
-            } catch {
-              Alert.alert('Ошибка', 'Не удалось снять задачу');
-            }
-          },
-        },
-      ]
-    );
   };
 
   const resetForm = () => {
@@ -259,26 +300,27 @@ export default function OrdersScreen() {
       material: order.material,
       load_address: order.load_address,
       unload_address: order.unload_address,
-      distance_km: order.distance_km.toString(),
+      distance_km: order.distance_km?.toString() ?? '',
       unit: order.unit,
       total_planned_volume: order.total_planned_volume?.toString() || '',
-      company_rate: order.company_rate.toString(),
-      driver_rate: order.driver_rate.toString(),
+      company_rate: order.company_rate?.toString() ?? '',
+      driver_rate: order.driver_rate?.toString() ?? '',
       sender: order.sender || '',
       receiver: order.receiver || '',
     });
     setEditModalVisible(true);
   };
 
-  const renderOrder = ({ item }: { item: Order }) => (
+  // ── Карточка активной задачи ────────────────────────────────────────────────
+  const renderActiveOrder = ({ item }: { item: Order }) => (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <View style={styles.cardTitle}>
           <Text style={styles.taskName}>{item.task_name || 'Без названия'}</Text>
           <Text style={styles.orderId}>#{item.id}</Text>
         </View>
-        <TouchableOpacity onPress={() => handleDeactivateOrder(item)}>
-          <Ionicons name="close-circle" size={24} color="#ef4444" />
+        <TouchableOpacity onPress={() => handleArchiveOrder(item)}>
+          <Ionicons name="archive-outline" size={24} color="#f59e0b" />
         </TouchableOpacity>
       </View>
       <Text style={styles.customer}>Заказчик: {item.customer}</Text>
@@ -301,7 +343,59 @@ export default function OrdersScreen() {
           <Ionicons name="pencil" size={14} color="white" />
           <Text style={styles.cardActionText}>Редактировать</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.duplicateBtn} onPress={() => openDuplicateModal(item)}>
+        <TouchableOpacity style={styles.duplicateBtn} onPress={() => {
+          setSelectedOrder(item);
+          setDuplicateDriverId(null);
+          setDuplicateModalVisible(true);
+        }}>
+          <Ionicons name="copy" size={14} color="white" />
+          <Text style={styles.cardActionText}>Дублировать</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  // ── Карточка архивной задачи ────────────────────────────────────────────────
+  const renderArchivedOrder = ({ item }: { item: Order }) => (
+    <View style={[styles.card, styles.archivedCard]}>
+      <View style={styles.cardHeader}>
+        <View style={styles.cardTitle}>
+          <Text style={[styles.taskName, { color: '#6b7280' }]}>{item.task_name || 'Без названия'}</Text>
+          <Text style={styles.orderId}>#{item.id}</Text>
+          <View style={styles.archiveBadge}>
+            <Text style={styles.archiveBadgeText}>Архив</Text>
+          </View>
+        </View>
+      </View>
+      <Text style={styles.customer}>Заказчик: {item.customer}</Text>
+      <Text style={styles.material}>Материал: {item.material}</Text>
+      <View style={styles.addressRow}>
+        <Ionicons name="location" size={16} color="#9ca3af" />
+        <Text style={[styles.address, { color: '#9ca3af' }]}>{item.load_address} → {item.unload_address}</Text>
+      </View>
+      <View style={styles.detailsRow}>
+        <Text style={styles.detail}>📏 {item.distance_km} км</Text>
+        <Text style={styles.detail}>⚖️ {item.unit}</Text>
+        <Text style={styles.detail}>💰 {item.driver_rate} ₽/рейс</Text>
+      </View>
+      <View style={styles.driverInfo}>
+        <Ionicons name="person" size={14} color="#9ca3af" />
+        <Text style={[styles.driverText, { color: '#9ca3af' }]}>Водитель: {item.driver_name || item.driver_id}</Text>
+      </View>
+      <View style={styles.cardActions}>
+        <TouchableOpacity style={styles.restoreBtn} onPress={() => handleRestoreOrder(item)}>
+          <Ionicons name="refresh" size={14} color="white" />
+          <Text style={styles.cardActionText}>Восстановить</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.editBtn} onPress={() => openEditModal(item)}>
+          <Ionicons name="pencil" size={14} color="white" />
+          <Text style={styles.cardActionText}>Редактировать</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.duplicateBtn} onPress={() => {
+          setSelectedOrder(item);
+          setDuplicateDriverId(null);
+          setDuplicateModalVisible(true);
+        }}>
           <Ionicons name="copy" size={14} color="white" />
           <Text style={styles.cardActionText}>Дублировать</Text>
         </TouchableOpacity>
@@ -311,6 +405,7 @@ export default function OrdersScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Заголовок */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
           <Text style={styles.back}>← Назад</Text>
@@ -321,6 +416,36 @@ export default function OrdersScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Вкладки Активные / Архив */}
+      <View style={styles.tabs}>
+        <TouchableOpacity
+          style={[styles.tabBtn, tab === 'active' && styles.tabBtnActive]}
+          onPress={() => setTab('active')}
+        >
+          <Text style={[styles.tabBtnText, tab === 'active' && styles.tabBtnTextActive]}>
+            ✅ Активные ({activeOrders.length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabBtn, tab === 'archive' && styles.tabBtnActive]}
+          onPress={() => setTab('archive')}
+        >
+          <Text style={[styles.tabBtnText, tab === 'archive' && styles.tabBtnTextActive]}>
+            📦 Архив ({archivedOrders.length})
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Подсказка для архива */}
+      {tab === 'archive' && (
+        <View style={styles.archiveHint}>
+          <Ionicons name="information-circle-outline" size={15} color="#92400e" />
+          <Text style={styles.archiveHintText}>
+            Задачи из архива можно восстановить — они снова станут активными для водителя.
+          </Text>
+        </View>
+      )}
+
       {/* Поиск */}
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={20} color="#9ca3af" />
@@ -329,6 +454,7 @@ export default function OrdersScreen() {
           placeholder="Поиск по заказчику, материалу..."
           value={searchQuery}
           onChangeText={setSearchQuery}
+          placeholderTextColor="#9ca3af"
         />
         {searchQuery ? (
           <TouchableOpacity onPress={() => setSearchQuery('')}>
@@ -337,7 +463,7 @@ export default function OrdersScreen() {
         ) : null}
       </View>
 
-      {/* ── Фильтр по водителю ── */}
+      {/* Фильтр по водителю */}
       <Text style={styles.filterLabel}>Водитель:</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
         <TouchableOpacity
@@ -359,7 +485,7 @@ export default function OrdersScreen() {
         ))}
       </ScrollView>
 
-      {/* ── Фильтр по заказчику ── */}
+      {/* Фильтр по заказчику */}
       {uniqueCustomers.length > 0 && (
         <>
           <Text style={styles.filterLabel}>Заказчик:</Text>
@@ -383,43 +509,44 @@ export default function OrdersScreen() {
         </>
       )}
 
-      {/* Счётчик */}
       <Text style={styles.countLabel}>
-        Показано: {filteredOrders.length} из {orders.length} задач
+        Показано: {filteredOrders.length} {tab === 'active' ? 'активных' : 'архивных'} задач
       </Text>
 
       <FlatList
         data={filteredOrders}
-        renderItem={renderOrder}
+        renderItem={tab === 'active' ? renderActiveOrder : renderArchivedOrder}
         keyExtractor={(item) => item.id.toString()}
         showsVerticalScrollIndicator={false}
-        ListEmptyComponent={<Text style={styles.emptyText}>Нет задач по выбранному фильтру</Text>}
+        ListEmptyComponent={
+          <Text style={styles.emptyText}>
+            {tab === 'active'
+              ? 'Нет активных задач. Создайте задачу кнопкой "+ Создать"'
+              : 'Архив пуст'}
+          </Text>
+        }
         refreshing={loading}
         onRefresh={loadInitialData}
       />
 
-      {/* Модальное окно создания задачи */}
+      {/* ── Модал создания ──────────────────────────────────────────────────── */}
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentContainer}>
             <Text style={styles.modalTitle}>Новая задача</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="Название задачи (необязательно)"
-              value={formData.task_name}
-              onChangeText={(text) => setFormData({ ...formData, task_name: text })}
-            />
+            <TextInput style={styles.input} placeholder="Название задачи (необязательно)"
+              value={formData.task_name} onChangeText={(t) => setFormData({ ...formData, task_name: t })}
+              placeholderTextColor="#9ca3af" />
 
             <Text style={styles.label}>Водитель *</Text>
             <View style={styles.pickerContainer}>
               {drivers.map((d) => (
-                <TouchableOpacity
-                  key={d.id}
+                <TouchableOpacity key={d.id}
                   style={[styles.pickerOption, formData.driver_id === d.id && styles.pickerOptionSelected]}
-                  onPress={() => setFormData({ ...formData, driver_id: d.id, car_number: d.car_number })}
-                >
-                  <Text style={styles.pickerText}>{d.full_name} ({d.car_number})</Text>
+                  onPress={() => setFormData({ ...formData, driver_id: d.id, car_number: d.car_number })}>
+                  <Text style={[styles.pickerText, formData.driver_id === d.id && { color: 'white' }]}>
+                    {d.full_name} {d.car_number ? `(${d.car_number})` : ''}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -428,61 +555,58 @@ export default function OrdersScreen() {
             {customers.length > 0 && (
               <View style={styles.pickerContainer}>
                 {customers.map((c) => (
-                  <TouchableOpacity
-                    key={c}
+                  <TouchableOpacity key={c}
                     style={[styles.pickerOption, formData.customer === c && styles.pickerOptionSelected]}
-                    onPress={() => setFormData({ ...formData, customer: c })}
-                  >
-                    <Text style={styles.pickerText}>{c}</Text>
+                    onPress={() => setFormData({ ...formData, customer: c })}>
+                    <Text style={[styles.pickerText, formData.customer === c && { color: 'white' }]}>{c}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
             )}
-            <TextInput
-              style={styles.input}
-              placeholder="Введите название заказчика *"
-              value={formData.customer}
-              onChangeText={(text) => setFormData({ ...formData, customer: text })}
-            />
+            <TextInput style={styles.input} placeholder="Введите название заказчика *"
+              value={formData.customer} onChangeText={(t) => setFormData({ ...formData, customer: t })}
+              placeholderTextColor="#9ca3af" />
 
             <TextInput style={styles.input} placeholder="Материал *" value={formData.material}
-              onChangeText={(text) => setFormData({ ...formData, material: text })} />
+              onChangeText={(t) => setFormData({ ...formData, material: t })} placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Адрес погрузки *" value={formData.load_address}
-              onChangeText={(text) => setFormData({ ...formData, load_address: text })} />
+              onChangeText={(t) => setFormData({ ...formData, load_address: t })} placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Адрес выгрузки *" value={formData.unload_address}
-              onChangeText={(text) => setFormData({ ...formData, unload_address: text })} />
+              onChangeText={(t) => setFormData({ ...formData, unload_address: t })} placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Расстояние (км) *" keyboardType="numeric"
-              value={formData.distance_km} onChangeText={(text) => setFormData({ ...formData, distance_km: text })} />
+              value={formData.distance_km} onChangeText={(t) => setFormData({ ...formData, distance_km: t })}
+              placeholderTextColor="#9ca3af" />
 
             <View style={styles.row}>
               <View style={styles.halfInput}>
                 <Text style={styles.label}>Ед. изм.</Text>
                 <View style={styles.unitButtons}>
-                  <TouchableOpacity style={[styles.unitButton, formData.unit === 'м3' && styles.unitButtonActive]}
-                    onPress={() => setFormData({ ...formData, unit: 'м3' })}>
-                    <Text>м3</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.unitButton, formData.unit === 'т' && styles.unitButtonActive]}
-                    onPress={() => setFormData({ ...formData, unit: 'т' })}>
-                    <Text>т</Text>
-                  </TouchableOpacity>
+                  {['м3', 'т'].map(u => (
+                    <TouchableOpacity key={u} style={[styles.unitButton, formData.unit === u && styles.unitButtonActive]}
+                      onPress={() => setFormData({ ...formData, unit: u })}>
+                      <Text style={formData.unit === u ? { color: 'white', fontWeight: '600' } : {}}>{u}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </View>
               <View style={styles.halfInput}>
-                <TextInput style={styles.input} placeholder="Плановый объём" keyboardType="numeric"
+                <TextInput style={[styles.input, { marginTop: 22 }]} placeholder="Плановый объём" keyboardType="numeric"
                   value={formData.total_planned_volume}
-                  onChangeText={(text) => setFormData({ ...formData, total_planned_volume: text })} />
+                  onChangeText={(t) => setFormData({ ...formData, total_planned_volume: t })}
+                  placeholderTextColor="#9ca3af" />
               </View>
             </View>
 
             <TextInput style={styles.input} placeholder="Ставка компании (руб/ед) *" keyboardType="numeric"
-              value={formData.company_rate} onChangeText={(text) => setFormData({ ...formData, company_rate: text })} />
+              value={formData.company_rate} onChangeText={(t) => setFormData({ ...formData, company_rate: t })}
+              placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Ставка водителя (руб/рейс) *" keyboardType="numeric"
-              value={formData.driver_rate} onChangeText={(text) => setFormData({ ...formData, driver_rate: text })} />
-            <TextInput style={styles.input} placeholder="Отправитель (опционально)" value={formData.sender}
-              onChangeText={(text) => setFormData({ ...formData, sender: text })} />
-            <TextInput style={styles.input} placeholder="Получатель (опционально)" value={formData.receiver}
-              onChangeText={(text) => setFormData({ ...formData, receiver: text })} />
+              value={formData.driver_rate} onChangeText={(t) => setFormData({ ...formData, driver_rate: t })}
+              placeholderTextColor="#9ca3af" />
+            <TextInput style={styles.input} placeholder="Отправитель (необязательно)" value={formData.sender}
+              onChangeText={(t) => setFormData({ ...formData, sender: t })} placeholderTextColor="#9ca3af" />
+            <TextInput style={styles.input} placeholder="Получатель (необязательно)" value={formData.receiver}
+              onChangeText={(t) => setFormData({ ...formData, receiver: t })} placeholderTextColor="#9ca3af" />
 
             <TouchableOpacity style={styles.saveBtn} onPress={handleCreateOrder}>
               <Text style={styles.saveBtnText}>Создать задачу</Text>
@@ -494,57 +618,56 @@ export default function OrdersScreen() {
         </View>
       </Modal>
 
-      {/* Модальное окно редактирования */}
+      {/* ── Модал редактирования ────────────────────────────────────────────── */}
       <Modal visible={editModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentContainer}>
-            <Text style={styles.modalTitle}>Редактировать задачу #{selectedOrder?.id}</Text>
+            <Text style={styles.modalTitle}>Редактировать #{selectedOrder?.id}</Text>
 
             <TextInput style={styles.input} placeholder="Название" value={editFormData.task_name}
-              onChangeText={(text) => setEditFormData({ ...editFormData, task_name: text })} />
+              onChangeText={(t) => setEditFormData({ ...editFormData, task_name: t })} placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Заказчик" value={editFormData.customer}
-              onChangeText={(text) => setEditFormData({ ...editFormData, customer: text })} />
+              onChangeText={(t) => setEditFormData({ ...editFormData, customer: t })} placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Материал" value={editFormData.material}
-              onChangeText={(text) => setEditFormData({ ...editFormData, material: text })} />
+              onChangeText={(t) => setEditFormData({ ...editFormData, material: t })} placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Адрес погрузки" value={editFormData.load_address}
-              onChangeText={(text) => setEditFormData({ ...editFormData, load_address: text })} />
+              onChangeText={(t) => setEditFormData({ ...editFormData, load_address: t })} placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Адрес выгрузки" value={editFormData.unload_address}
-              onChangeText={(text) => setEditFormData({ ...editFormData, unload_address: text })} />
+              onChangeText={(t) => setEditFormData({ ...editFormData, unload_address: t })} placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Расстояние (км)" keyboardType="numeric"
               value={editFormData.distance_km}
-              onChangeText={(text) => setEditFormData({ ...editFormData, distance_km: text })} />
+              onChangeText={(t) => setEditFormData({ ...editFormData, distance_km: t })} placeholderTextColor="#9ca3af" />
 
             <View style={styles.row}>
               <View style={styles.halfInput}>
                 <Text style={styles.label}>Ед. изм.</Text>
                 <View style={styles.unitButtons}>
-                  <TouchableOpacity style={[styles.unitButton, editFormData.unit === 'м3' && styles.unitButtonActive]}
-                    onPress={() => setEditFormData({ ...editFormData, unit: 'м3' })}>
-                    <Text>м3</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.unitButton, editFormData.unit === 'т' && styles.unitButtonActive]}
-                    onPress={() => setEditFormData({ ...editFormData, unit: 'т' })}>
-                    <Text>т</Text>
-                  </TouchableOpacity>
+                  {['м3', 'т'].map(u => (
+                    <TouchableOpacity key={u} style={[styles.unitButton, editFormData.unit === u && styles.unitButtonActive]}
+                      onPress={() => setEditFormData({ ...editFormData, unit: u })}>
+                      <Text style={editFormData.unit === u ? { color: 'white', fontWeight: '600' } : {}}>{u}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </View>
               <View style={styles.halfInput}>
-                <TextInput style={styles.input} placeholder="Плановый объём" keyboardType="numeric"
+                <TextInput style={[styles.input, { marginTop: 22 }]} placeholder="Плановый объём" keyboardType="numeric"
                   value={editFormData.total_planned_volume}
-                  onChangeText={(text) => setEditFormData({ ...editFormData, total_planned_volume: text })} />
+                  onChangeText={(t) => setEditFormData({ ...editFormData, total_planned_volume: t })}
+                  placeholderTextColor="#9ca3af" />
               </View>
             </View>
 
             <TextInput style={styles.input} placeholder="Ставка компании" keyboardType="numeric"
               value={editFormData.company_rate}
-              onChangeText={(text) => setEditFormData({ ...editFormData, company_rate: text })} />
+              onChangeText={(t) => setEditFormData({ ...editFormData, company_rate: t })} placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Ставка водителя" keyboardType="numeric"
               value={editFormData.driver_rate}
-              onChangeText={(text) => setEditFormData({ ...editFormData, driver_rate: text })} />
+              onChangeText={(t) => setEditFormData({ ...editFormData, driver_rate: t })} placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Отправитель" value={editFormData.sender}
-              onChangeText={(text) => setEditFormData({ ...editFormData, sender: text })} />
+              onChangeText={(t) => setEditFormData({ ...editFormData, sender: t })} placeholderTextColor="#9ca3af" />
             <TextInput style={styles.input} placeholder="Получатель" value={editFormData.receiver}
-              onChangeText={(text) => setEditFormData({ ...editFormData, receiver: text })} />
+              onChangeText={(t) => setEditFormData({ ...editFormData, receiver: t })} placeholderTextColor="#9ca3af" />
 
             <TouchableOpacity style={styles.saveBtn} onPress={handleEditOrder}>
               <Text style={styles.saveBtnText}>Сохранить изменения</Text>
@@ -556,23 +679,23 @@ export default function OrdersScreen() {
         </View>
       </Modal>
 
-      {/* Модал дублирования */}
+      {/* ── Модал дублирования ─────────────────────────────────────────────── */}
       <Modal visible={duplicateModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Дублировать задачу</Text>
             <Text style={{ color: '#4b5563', marginBottom: 16 }}>
-              Задача «{selectedOrder?.task_name || selectedOrder?.customer}» будет скопирована для выбранного водителя
+              «{selectedOrder?.task_name || selectedOrder?.customer}» — скопировать для другого водителя
             </Text>
             <Text style={styles.label}>Выберите водителя *</Text>
             <ScrollView style={{ maxHeight: 300 }}>
               {drivers.map((d) => (
-                <TouchableOpacity
-                  key={d.id}
+                <TouchableOpacity key={d.id}
                   style={[styles.pickerOption, duplicateDriverId === d.id && styles.pickerOptionSelected, { marginBottom: 8 }]}
-                  onPress={() => setDuplicateDriverId(d.id)}
-                >
-                  <Text style={styles.pickerText}>{d.full_name} ({d.car_number})</Text>
+                  onPress={() => setDuplicateDriverId(d.id)}>
+                  <Text style={[styles.pickerText, duplicateDriverId === d.id && { color: 'white' }]}>
+                    {d.full_name} {d.car_number ? `(${d.car_number})` : ''}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -600,12 +723,29 @@ const styles = StyleSheet.create({
   addBtn: { backgroundColor: '#2563eb', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
   addBtnText: { color: 'white', fontWeight: '600' },
 
+  // Tabs
+  tabs: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  tabBtn: {
+    flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5,
+    borderColor: '#d1d5db', backgroundColor: 'white', alignItems: 'center',
+  },
+  tabBtnActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
+  tabBtnText: { fontSize: 13, fontWeight: '600', color: '#4b5563' },
+  tabBtnTextActive: { color: 'white' },
+
+  archiveHint: {
+    flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#fef3c7',
+    borderRadius: 8, padding: 10, marginBottom: 10, gap: 6,
+    borderWidth: 1, borderColor: '#fcd34d',
+  },
+  archiveHintText: { flex: 1, fontSize: 12, color: '#92400e', lineHeight: 17 },
+
   searchContainer: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
     marginBottom: 10, borderWidth: 1, borderColor: '#e5e7eb',
   },
-  searchInput: { flex: 1, marginLeft: 8, fontSize: 16 },
+  searchInput: { flex: 1, marginLeft: 8, fontSize: 16, color: '#111827' },
 
   filterLabel: { fontSize: 12, color: '#6b7280', fontWeight: '500', marginBottom: 4 },
   filterRow: { marginBottom: 8 },
@@ -622,15 +762,20 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: 'white', padding: 16, borderRadius: 12,
-    marginBottom: 10, borderWidth: 1, borderColor: '#eee',
+    marginBottom: 10, borderWidth: 1, borderColor: '#eee', elevation: 1,
   },
+  archivedCard: { backgroundColor: '#fafafa', borderColor: '#e5e7eb' },
   cardHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 8,
   },
-  cardTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cardTitle: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   taskName: { fontSize: 16, fontWeight: '600' },
   orderId: { fontSize: 12, color: '#6b7280' },
+  archiveBadge: {
+    backgroundColor: '#fef3c7', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2,
+  },
+  archiveBadgeText: { fontSize: 11, color: '#92400e', fontWeight: '600' },
   customer: { fontSize: 14, color: '#1f2937', marginBottom: 4 },
   material: { fontSize: 14, color: '#4b5563', marginBottom: 4 },
   addressRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
@@ -651,28 +796,32 @@ const styles = StyleSheet.create({
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#7c3aed', paddingVertical: 7, borderRadius: 7, gap: 4,
   },
+  restoreBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#16a34a', paddingVertical: 7, borderRadius: 7, gap: 4,
+  },
   cardActionText: { color: 'white', fontSize: 12, fontWeight: '600' },
-  emptyText: { textAlign: 'center', color: '#6b7280', marginTop: 40 },
+  emptyText: { textAlign: 'center', color: '#6b7280', marginTop: 40, lineHeight: 22 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '90%' },
   modalContentContainer: { padding: 24, paddingBottom: 40 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 16 },
-  label: { fontSize: 14, fontWeight: '500', marginBottom: 4, marginTop: 8 },
+  label: { fontSize: 14, fontWeight: '500', marginBottom: 4, marginTop: 8, color: '#374151' },
   input: {
     borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8,
-    padding: 12, fontSize: 16, marginBottom: 12,
+    padding: 12, fontSize: 16, marginBottom: 12, color: '#111827', backgroundColor: '#f9fafb',
   },
   pickerContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   pickerOption: { backgroundColor: '#f3f4f6', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 },
   pickerOptionSelected: { backgroundColor: '#2563eb' },
-  pickerText: { fontSize: 14 },
-  row: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  pickerText: { fontSize: 14, color: '#111827' },
+  row: { flexDirection: 'row', gap: 12 },
   halfInput: { flex: 1 },
   unitButtons: { flexDirection: 'row', gap: 8, marginTop: 4 },
   unitButton: { backgroundColor: '#f3f4f6', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
   unitButtonActive: { backgroundColor: '#2563eb' },
-  saveBtn: { backgroundColor: '#2563eb', padding: 16, borderRadius: 8, alignItems: 'center', marginBottom: 8 },
+  saveBtn: { backgroundColor: '#2563eb', padding: 16, borderRadius: 8, alignItems: 'center', marginBottom: 8, marginTop: 4 },
   saveBtnText: { color: 'white', fontSize: 16, fontWeight: '600' },
   cancelBtn: { padding: 16, alignItems: 'center' },
   cancelBtnText: { color: '#6b7280', fontSize: 16 },
