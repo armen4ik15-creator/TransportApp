@@ -7,8 +7,18 @@ export const getDrivers = async () => {
     .select('id, full_name, car_number, role')
     .eq('role', 'driver')
     .order('full_name');
-  if (error) throw error;
-  return data ?? [];
+  // RLS may return permission error — treat as empty list rather than crash
+  if (error) {
+    console.warn('getDrivers error:', error.message);
+    if (error.code === '42501' || error.message?.includes('permission')) return [];
+    throw error;
+  }
+  return (data ?? []).map((d: any) => ({
+    id: d.id ?? '',
+    full_name: d.full_name ?? '',
+    car_number: d.car_number ?? null,
+    role: d.role ?? 'driver',
+  }));
 };
 
 export const addDriver = async (_full_name: string, _car_number: string) => {

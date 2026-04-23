@@ -94,11 +94,15 @@ export default function DriversScreen() {
     }
   };
 
-  const renderDriver = ({ item }: { item: Driver }) => (
+  const renderDriver = ({ item }: { item: Driver }) => {
+    // Safe first letter: handle null, undefined, and empty string
+    const firstLetter = (item.full_name?.trim()?.[0] ?? '?').toUpperCase();
+
+    return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <View style={[styles.avatar, { backgroundColor: '#2563eb' }]}>
-          <Text style={styles.avatarText}>{(item.full_name ?? '?')[0].toUpperCase()}</Text>
+          <Text style={styles.avatarText}>{firstLetter}</Text>
         </View>
         <View style={styles.cardInfo}>
           <Text style={styles.driverName}>{item.full_name ?? '—'}</Text>
@@ -121,7 +125,8 @@ export default function DriversScreen() {
         </TouchableOpacity>
       </View>
     </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
