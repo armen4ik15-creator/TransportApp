@@ -8,6 +8,15 @@
     "scheme": "transportapp",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/c7bfffdc-1df4-4b5a-b99b-7ab624571955",
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 3000
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.reestpro.transport"

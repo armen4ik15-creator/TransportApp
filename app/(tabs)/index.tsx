@@ -2,6 +2,14 @@ import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
+const ROLE_LABELS: Record<string, string> = {
+  owner:            'Учредитель',
+  admin:            'Администратор',
+  accountant:       'Бухгалтер',
+  chief_accountant: 'Главный бухгалтер',
+  finance_director: 'Финансовый директор',
+};
+
 const MENU_ITEMS = [
   { title: 'Заказы', subtitle: 'Назначить задачи водителям', icon: '📦', route: '/(tabs)/orders' },
   { title: 'Водители', subtitle: 'Список водителей и машины', icon: '👤', route: '/(tabs)/drivers' },
@@ -22,7 +30,9 @@ export default function HomeScreen() {
         <View>
           <Text style={styles.greeting}>Добро пожаловать!</Text>
           <Text style={styles.name}>{profile?.full_name || user?.email}</Text>
-          <Text style={styles.role}>Учредитель</Text>
+          <Text style={styles.role}>
+            {ROLE_LABELS[profile?.role ?? ''] ?? 'Администратор'}
+          </Text>
         </View>
         <TouchableOpacity style={styles.logoutBtn} onPress={signOut} activeOpacity={0.8}>
           <Text style={styles.logoutText}>Выйти</Text>

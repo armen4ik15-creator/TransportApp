@@ -19,10 +19,12 @@ export default function Index() {
     return <Redirect href="/login" />;
   }
 
-  // Роль берём из таблицы profiles
-  if (profile?.role === 'owner') {
-    return <Redirect href="/(tabs)" />;
-  } else {
+  // Роль берём из таблицы profiles.
+  // Только водители идут на экран водителя; всем остальным (owner/admin/
+  // accountant/chief_accountant/finance_director, а также NULL-роль нового
+  // аккаунта, которому ещё не назначили роль вручную) открываем админ-панель.
+  if (profile?.role === 'driver') {
     return <Redirect href="/(driver)" />;
   }
+  return <Redirect href="/(tabs)" />;
 }
