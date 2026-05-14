@@ -27,8 +27,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // onAuthStateChange в Supabase v2 всегда сначала стреляет INITIAL_SESSION
-    // поэтому getSession() не нужен — используем только onAuthStateChange
+    // Safety timeout: if Supabase events stall on cold start, never leave the
+    // UI in an infinite loading spinner — fall back to "no session" after 8s.
+    const safety = setTimeout(() => setIsLoading(false), 8000);
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -37,18 +39,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null);
       }
       setIsLoading(false);
+      clearTimeout(safety);
     });
 
-    return () => subscription.unsubscribe();
+    return () => { subscription.unsubscribe(); clearTimeout(safety); };
   }, []);
 
   async function fetchProfile(userId: string) {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    if (!error && data) setProfile(data);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      if (!error && data) setProfile(data);
+      else if (error) console.warn('fetchProfile error:', error.message);
+    } catch (e) {
+      console.warn('fetchProfile threw:', e);
+    }
   }
 
   const signIn = async (email: string, password: string): Promise<boolean> => {
