@@ -89,22 +89,23 @@ export default function OrdersScreen() {
 
   const loadInitialData = async () => {
     setLoading(true);
-    try {
-      const [activeData, archiveData, driversData, customersData] = await Promise.all([
-        getActiveOrders(),
-        getArchivedOrders(),
-        getDrivers(),
-        getCustomers(),
-      ]);
-      setActiveOrders(activeData as Order[]);
-      setArchivedOrders(archiveData as Order[]);
-      setDrivers(driversData);
-      setCustomers(customersData);
-    } catch {
-      Alert.alert('Ошибка', 'Не удалось загрузить данные');
-    } finally {
-      setLoading(false);
-    }
+    // allSettled: одна провалившаяся загрузка не должна обнулять остальные
+    // (раньше из-за этого пустел список водителей в форме «Новая задача»).
+    const [activeRes, archiveRes, driversRes, customersRes] = await Promise.allSettled([
+      getActiveOrders(),
+      getArchivedOrders(),
+      getDrivers(),
+      getCustomers(),
+    ]);
+    if (activeRes.status === 'fulfilled')    setActiveOrders(activeRes.value as Order[]);
+    else                                     console.warn('getActiveOrders failed:', activeRes.reason);
+    if (archiveRes.status === 'fulfilled')   setArchivedOrders(archiveRes.value as Order[]);
+    else                                     console.warn('getArchivedOrders failed:', archiveRes.reason);
+    if (driversRes.status === 'fulfilled')   setDrivers(driversRes.value);
+    else                                     console.warn('getDrivers failed:', driversRes.reason);
+    if (customersRes.status === 'fulfilled') setCustomers(customersRes.value);
+    else                                     console.warn('getCustomers failed:', customersRes.reason);
+    setLoading(false);
   };
 
   const orders = tab === 'active' ? activeOrders : archivedOrders;
@@ -411,7 +412,17 @@ export default function OrdersScreen() {
           <Text style={styles.back}>← Назад</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Задачи</Text>
-        <TouchableOpacity style={styles.addBtn} onPress={() => setModalVisible(true)}>
+        <TouchableOpacity style={styles.addBtn} onPress={async () => {
+          // если список водителей/контрагентов пустой — догружаем сейчас,
+          // чтобы пользователь не увидел пустую секцию «Водитель» в форме
+          if (drivers.length === 0) {
+            try { setDrivers(await getDrivers()); } catch (e) { console.warn(e); }
+          }
+          if (customers.length === 0) {
+            try { setCustomers(await getCustomers()); } catch (e) { console.warn(e); }
+          }
+          setModalVisible(true);
+        }}>
           <Text style={styles.addBtnText}>+ Создать</Text>
         </TouchableOpacity>
       </View>
@@ -538,18 +549,31 @@ export default function OrdersScreen() {
               value={formData.task_name} onChangeText={(t) => setFormData({ ...formData, task_name: t })}
               placeholderTextColor="#9ca3af" />
 
-            <Text style={styles.label}>Водитель *</Text>
-            <View style={styles.pickerContainer}>
-              {drivers.map((d) => (
-                <TouchableOpacity key={d.id}
-                  style={[styles.pickerOption, formData.driver_id === d.id && styles.pickerOptionSelected]}
-                  onPress={() => setFormData({ ...formData, driver_id: d.id, car_number: d.car_number })}>
-                  <Text style={[styles.pickerText, formData.driver_id === d.id && { color: 'white' }]}>
-                    {d.full_name} {d.car_number ? `(${d.car_number})` : ''}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={styles.label}>Водитель *</Text>
+              <TouchableOpacity onPress={async () => {
+                try { setDrivers(await getDrivers()); } catch (e) { console.warn(e); }
+              }}>
+                <Text style={{ color: '#2563eb', fontSize: 13 }}>Обновить</Text>
+              </TouchableOpacity>
             </View>
+            {drivers.length === 0 ? (
+              <Text style={{ color: '#9ca3af', fontStyle: 'italic', marginBottom: 12 }}>
+                Список водителей пуст. Нажмите «Обновить» или дождитесь загрузки.
+              </Text>
+            ) : (
+              <View style={styles.pickerContainer}>
+                {drivers.map((d) => (
+                  <TouchableOpacity key={d.id}
+                    style={[styles.pickerOption, formData.driver_id === d.id && styles.pickerOptionSelected]}
+                    onPress={() => setFormData({ ...formData, driver_id: d.id, car_number: d.car_number })}>
+                    <Text style={[styles.pickerText, formData.driver_id === d.id && { color: 'white' }]}>
+                      {d.full_name} {d.car_number ? `(${d.car_number})` : ''}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
             <Text style={styles.label}>Заказчик *</Text>
             {customers.length > 0 && (
