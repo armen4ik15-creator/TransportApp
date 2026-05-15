@@ -85,26 +85,62 @@ export default function OrdersScreen() {
   const [duplicateModalVisible, setDuplicateModalVisible] = useState(false);
   const [duplicateDriverId, setDuplicateDriverId] = useState<string | null>(null);
 
+  // ── DEBUG-блок: убрать после диагностики ──────────────────────────────────
+  const [debug, setDebug] = useState<string>('Загрузка...');
+
   useEffect(() => { loadInitialData(); }, []);
 
   const loadInitialData = async () => {
     setLoading(true);
+    setDebug('Старт loadInitialData...');
     // allSettled: одна провалившаяся загрузка не должна обнулять остальные
-    // (раньше из-за этого пустел список водителей в форме «Новая задача»).
     const [activeRes, archiveRes, driversRes, customersRes] = await Promise.allSettled([
       getActiveOrders(),
       getArchivedOrders(),
       getDrivers(),
       getCustomers(),
     ]);
-    if (activeRes.status === 'fulfilled')    setActiveOrders(activeRes.value as Order[]);
-    else                                     console.warn('getActiveOrders failed:', activeRes.reason);
-    if (archiveRes.status === 'fulfilled')   setArchivedOrders(archiveRes.value as Order[]);
-    else                                     console.warn('getArchivedOrders failed:', archiveRes.reason);
-    if (driversRes.status === 'fulfilled')   setDrivers(driversRes.value);
-    else                                     console.warn('getDrivers failed:', driversRes.reason);
-    if (customersRes.status === 'fulfilled') setCustomers(customersRes.value);
-    else                                     console.warn('getCustomers failed:', customersRes.reason);
+
+    // Сформируем подробный отладочный отчёт
+    const lines: string[] = [];
+    lines.push(`user.id = ${user?.id?.slice(0, 8) ?? 'NO USER'}…`);
+
+    if (activeRes.status === 'fulfilled') {
+      const arr = activeRes.value as Order[];
+      lines.push(`active: OK ${Array.isArray(arr) ? arr.length : '?'} шт`);
+      if (Array.isArray(arr) && arr.length > 0) {
+        lines.push(`  [0] id=${arr[0]?.id} cust=${arr[0]?.customer}`);
+      }
+      setActiveOrders(arr);
+    } else {
+      lines.push(`active: FAIL ${String(activeRes.reason).slice(0, 80)}`);
+    }
+
+    if (archiveRes.status === 'fulfilled') {
+      const arr = archiveRes.value as Order[];
+      lines.push(`archive: OK ${Array.isArray(arr) ? arr.length : '?'} шт`);
+      setArchivedOrders(arr);
+    } else {
+      lines.push(`archive: FAIL ${String(archiveRes.reason).slice(0, 80)}`);
+    }
+
+    if (driversRes.status === 'fulfilled') {
+      const arr = driversRes.value;
+      lines.push(`drivers: OK ${Array.isArray(arr) ? arr.length : '?'} шт`);
+      setDrivers(arr);
+    } else {
+      lines.push(`drivers: FAIL ${String(driversRes.reason).slice(0, 80)}`);
+    }
+
+    if (customersRes.status === 'fulfilled') {
+      const arr = customersRes.value;
+      lines.push(`customers: OK ${Array.isArray(arr) ? arr.length : '?'} шт`);
+      setCustomers(arr);
+    } else {
+      lines.push(`customers: FAIL ${String(customersRes.reason).slice(0, 80)}`);
+    }
+
+    setDebug(lines.join('\n'));
     setLoading(false);
   };
 
@@ -424,6 +460,26 @@ export default function OrdersScreen() {
           setModalVisible(true);
         }}>
           <Text style={styles.addBtnText}>+ Создать</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── DEBUG-блок: показывает что вернули запросы. Убрать после диагностики ── */}
+      <View style={{
+        backgroundColor: '#fef3c7',
+        borderColor: '#f59e0b',
+        borderWidth: 2,
+        borderRadius: 8,
+        padding: 10,
+        marginBottom: 10,
+      }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', color: '#92400e', marginBottom: 4 }}>
+          🔧 DEBUG (временно)
+        </Text>
+        <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#7c2d12' }} selectable>
+          {debug}
+        </Text>
+        <TouchableOpacity onPress={loadInitialData} style={{ marginTop: 6 }}>
+          <Text style={{ color: '#2563eb', fontSize: 12 }}>↻ Перезагрузить</Text>
         </TouchableOpacity>
       </View>
 
