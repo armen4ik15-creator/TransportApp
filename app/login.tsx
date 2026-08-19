@@ -1,12 +1,21 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useAuth } from './context/AuthContext';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { signIn, user } = useAuth();
 
   useEffect(() => {
@@ -16,15 +25,21 @@ export default function LoginScreen() {
   }, [user]);
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Ошибка', 'Введите email и пароль');
+    if (!email.trim() || !password) {
+      setError('Введите email и пароль');
       return;
     }
+    setError(null);
     setLoading(true);
     try {
-      await signIn(email, password);
-    } catch (err: any) {
-      Alert.alert('Ошибка входа', err.message || 'Неверный email или пароль');
+      await signIn(email.trim(), password);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'Неверный email или пароль';
+      setError(message);
+      if (Platform.OS !== 'web') {
+        Alert.alert('Ошибка входа', message);
+      }
     } finally {
       setLoading(false);
     }
@@ -50,6 +65,8 @@ export default function LoginScreen() {
         value={password}
         onChangeText={setPassword}
       />
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
         <Text style={styles.buttonText}>{loading ? 'Вход...' : 'Войти'}</Text>
@@ -97,5 +114,12 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  error: {
+    width: '100%',
+    color: '#dc2626',
+    fontSize: 14,
+    marginBottom: 12,
+    textAlign: 'center',
   },
 });
